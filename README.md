@@ -5,11 +5,15 @@
 
 Welcome to the **nRF24 Jammer** repository! 🎉 Dive into the world of RF interference with this unique project based on the ESP32 and nRF24 technology.
 
+> **🔱 AmsaOne community fork — adds ESP32-S3 Super Mini support.**
+> This fork tracks upstream [W0rthlessS0ul/nRF24_jammer](https://github.com/W0rthlessS0ul/nRF24_jammer) and adds a new PlatformIO env, `esp32-s3-super-mini`, plus a conditional HSPI pin remap so the same firmware runs on the ESP32-S3 Super Mini boards used in modern Flipper Zero expansion builds. All upstream envs (`128x32_Flexible`, `128x64_Flexible`) are preserved and unchanged. See the [📡 ESP32-S3 Super Mini build](#-esp32-s3-super-mini-build) section.
+
 ## 📚 Table of Contents
 - [🎯 Possible Additions](#-possible-additions)
 - [🚀 What Can You Do with This?](#-what-can-you-do-with-this)
 - [📋 List of Components](#-list-of-components)
 - [🧑‍🔧 Let's Get Started with Soldering!](#-lets-get-started-with-soldering)
+- [📡 ESP32-S3 Super Mini build](#-esp32-s3-super-mini-build)
 - [🛠️ Build From Source](#-build-from-source)
 - [📦 Flash Firmware](#-flash-firmware)
 - [🎮 Device Control](#-device-control)
@@ -132,6 +136,73 @@ To bring this project to life, you will need the following components:
 ![Flexible](schemes/Flexible/scheme.png)
 
 ###### In all configurations the same SCK, MOSI, and MISO pins are used. This is not a mistake—SPI interfaces can share clock and data lines, while proper operation is ensured by separate control signals (CSN and CE)
+
+-----
+
+## 📡 ESP32-S3 Super Mini build
+
+This fork adds a dedicated PlatformIO env (`esp32-s3-super-mini`) so the firmware compiles and runs on the **ESP32-S3 Super Mini** (FH4R2 / FN8 variants). Useful for compact Flipper Zero expansion builds where the original ESP-WROOM-32 footprint is too large.
+
+### Why the S3 Super Mini works here
+
+| Resource              | Original (ESP-WROOM-32) | S3 Super Mini (FH4R2) | Verdict           |
+|-----------------------|-------------------------|-----------------------|-------------------|
+| SRAM                  | 520 KB                  | 512 KB                | equivalent        |
+| DRAM available        | ~320 KB                 | ~320 KB               | equivalent        |
+| PSRAM                 | none                    | 2 MB embedded (bonus) | **not required**  |
+| Flash                 | 4 MB                    | 4 MB (or 8 MB on FN8) | equivalent / +    |
+| App partition         | 1.9 MB (`min_spiffs`)   | 1.9 MB (`min_spiffs`) | ~700 KB free      |
+
+The firmware was designed for a no-PSRAM target, so the Super Mini's embedded PSRAM is unused — no `BOARD_HAS_PSRAM` flag is needed and none is set. Compiled size lands around 1.0–1.3 MB; runtime DRAM peaks around 80–150 KB.
+
+### What this fork changes
+
+- **`platformio.ini`** — adds the new `[env:esp32-s3-super-mini]` block. Original envs are untouched.
+- **`src/128x32_Flexible/jam.cpp`** and **`src/128x64_Flexible/jam.cpp`** — the `HSPI_init()` call is now conditional. When the `ESP32_S3_SUPER_MINI` macro is defined (set automatically by the new env via `build_flags`), `hp->begin(12, 13, 11, -1)` remaps SCK / MISO / MOSI to free GPIOs on the Super Mini. Otherwise the original `hp->begin()` is used and original ESP32 builds are unaffected.
+
+### Wiring (one nRF24, three-wire shared SPI)
+
+| nRF24 pin | S3 Super Mini GPIO | Notes                          |
+|-----------|--------------------|--------------------------------|
+| VCC       | 3.3V               | local 10 µF + 1 µF decoupling  |
+| GND       | GND                |                                |
+| CE        | GPIO 9             | runtime-configured via web UI  |
+| CSN       | GPIO 10            | runtime-configured via web UI  |
+| SCK       | GPIO 12            | hardcoded by the conditional   |
+| MOSI      | GPIO 11            | hardcoded by the conditional   |
+| MISO      | GPIO 13            | hardcoded by the conditional   |
+| IRQ       | —                  | unused                         |
+
+> ⚠️ **Power note:** the Super Mini's onboard 3V3 LDO is good for ~500 mA peak. A single nRF24L01+PA+LNA is fine; if you stack multiple, give each module its own ≥10 µF bulk cap and don't TX from more than one at a time.
+
+### Identify your variant
+
+Read the chip marking on the S3:
+- `ESP32-S3FH4R2` → 4 MB flash + 2 MB embedded PSRAM. Default config in `platformio.ini` already targets this.
+- `ESP32-S3FN8` → 8 MB flash, no PSRAM. Change `board_build.flash_size = 4MB` to `8MB` in the env block.
+- Bare `ESP32-S3` with external flash → check the external SPI flash IC for size and adjust accordingly.
+
+### Build & flash
+
+```bash
+# Windows tip: use `python -m platformio` rather than bare `pio.exe` to avoid
+# the well-known PIO self-replace lock on Windows hosts.
+python -m platformio run -e esp32-s3-super-mini
+python -m platformio run -e esp32-s3-super-mini -t upload
+python -m platformio device monitor -e esp32-s3-super-mini
+```
+
+The Super Mini uses native USB-CDC for flashing (no USB-to-UART chip on board) — the env sets `ARDUINO_USB_CDC_ON_BOOT=1` and `ARDUINO_USB_MODE=1` automatically so `Serial` output appears on the same USB-C port used for upload.
+
+### First-boot configuration
+
+CE/CSN pins are runtime-configured (stored in EEPROM) via the web UI:
+
+1. Power the board (USB-C, or 5 V into the 5V pin from your host project — but **not both at once**)
+2. Connect a phone or laptop to the WiFi AP `jammer` (default password: `W0rthlessS0ul`)
+3. Browse to `http://192.168.4.1`
+4. Open the nRF24 setup page → set `count = 1`, `ce = 9`, `csn = 10` → save
+5. Power-cycle once. Done.
 
 -----
 

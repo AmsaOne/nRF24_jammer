@@ -28,7 +28,11 @@ void DeinitRadios(bool stopConstCarrier)
 void HSPI_init()
 {
   hp = new SPIClass(HSPI);
+#ifdef ESP32_S3_SUPER_MINI
+  hp->begin(12, 13, 11, -1);
+#else
   hp->begin();
+#endif
   hp->setFrequency(16000000);
   hp->setBitOrder(MSBFIRST);
   hp->setDataMode(SPI_MODE0);
